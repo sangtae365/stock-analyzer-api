@@ -5,3 +5,9 @@ target/
 .idea/
 *.iml
 .DS_Store
+
+# 실제 키가 담긴 로컬 전용 설정 파일 - 절대 커밋 금지
+application-local.yml
+application-local.yaml
+application-secret.yml
+.env
