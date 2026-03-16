@@ -1,0 +1,14 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: stock-analyzer
+
+kis:
+  base-url: https://openapi.koreainvestment.com:9443
+  app-key: ${KIS_APP_KEY:your-app-key-here}
+  app-secret: ${KIS_APP_SECRET:your-app-secret-here}
+  timeout:
+    connect-ms: 5000   # 연결 타임아웃 (ms)
+    read-ms: 10000     # 읽기 타임아웃 (ms)
