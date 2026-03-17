@@ -1,14 +1,27 @@
 server:
   port: 8080
 
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
 spring:
   application:
     name: stock-analyzer
 
 kis:
+  # 실전투자: https://openapi.koreainvestment.com:9443
+  # 모의투자: https://openapivts.koreainvestment.com:29443
   base-url: https://openapi.koreainvestment.com:9443
   app-key: ${KIS_APP_KEY:your-app-key-here}
   app-secret: ${KIS_APP_SECRET:your-app-secret-here}
   timeout:
-    connect-ms: 5000   # 연결 타임아웃 (ms)
-    read-ms: 10000     # 읽기 타임아웃 (ms)
+    connect-ms: 5000 # 연결 타임아웃 (ms)
+    read-ms: 10000 # 읽기 타임아웃 (ms)
+
+gemini:
+  api-key: ${GEMINI_API_KEY:your-gemini-api-key-here}
+  model: gemini-2.5-flash

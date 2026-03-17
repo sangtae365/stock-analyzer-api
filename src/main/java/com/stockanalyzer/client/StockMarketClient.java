@@ -1,9 +1,14 @@
 package com.stockanalyzer.client;
 
+import com.stockanalyzer.client.dto.KisChangeRateRankResponse;
+import com.stockanalyzer.client.dto.KisChartResponse;
+import com.stockanalyzer.client.dto.KisInvestorTrendResponse;
+import com.stockanalyzer.client.dto.KisMarketCapRankResponse;
 import com.stockanalyzer.client.dto.KisPriceResponse;
+import com.stockanalyzer.client.dto.KisStockInfoResponse;
 import com.stockanalyzer.client.dto.KisTokenRequest;
 import com.stockanalyzer.client.dto.KisTokenResponse;
-import com.stockanalyzer.dto.StockDto;
+import com.stockanalyzer.client.dto.KisVolumeRankResponse;
 import com.stockanalyzer.exception.KisApiException;
 import io.netty.channel.ChannelOption;
 import org.slf4j.Logger;
@@ -43,13 +48,20 @@ public class StockMarketClient {
         this.appKey    = appKey;
         this.appSecret = appSecret;
 
+        log.info("KIS 클라이언트 초기화 | base-url={} | app-key={}...{} | app-secret={}...{}",
+                baseUrl,
+                appKey.substring(0, Math.min(4, appKey.length())),
+                appKey.substring(Math.max(0, appKey.length() - 4)),
+                appSecret.substring(0, Math.min(4, appSecret.length())),
+                appSecret.substring(Math.max(0, appSecret.length() - 4)));
+
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectMs)
                 .responseTimeout(Duration.ofMillis(readMs));
 
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, "application/json; charset=utf-8")
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
     }
@@ -88,17 +100,284 @@ public class StockMarketClient {
         }
     }
 
-    // ── 현재가 조회 ────────────────────────────────────────────────────────
+    // ── 기간별 차트 조회 (FHKST03010100) ─────────────────────────────────
 
     /**
-     * 종목 현재가 조회 (KIS FHKST01010100)
-     * @param ticker 종목 코드 (예: "005930")
-     * @return StockDto (조회 실패 시 empty)
+     * 국내주식 기간별시세 차트 조회
+     * @param ticker     종목코드
+     * @param startDate  시작일 (YYYYMMDD)
+     * @param endDate    종료일 (YYYYMMDD)
+     * @param period     D:일봉 W:주봉 M:월봉 Y:년봉
      */
-    public Optional<StockDto> getCurrentPrice(String ticker, String sector) {
+    public Optional<KisChartResponse> getChartData(String ticker, String startDate, String endDate, String period) {
         try {
             String token = getAccessToken();
+            KisChartResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice")
+                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                            .queryParam("FID_INPUT_ISCD", ticker)
+                            .queryParam("FID_INPUT_DATE_1", startDate)
+                            .queryParam("FID_INPUT_DATE_2", endDate)
+                            .queryParam("FID_PERIOD_DIV_CODE", period)
+                            .queryParam("FID_ORG_ADJ_PRC", "0")
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "FHKST03010100")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("차트 조회 실패 [" + ticker + "]: " + body, res.statusCode().value())))
+                    .bodyToMono(KisChartResponse.class)
+                    .block(Duration.ofSeconds(10));
 
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 차트 응답 비정상 [{}]: {}", ticker, response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("차트 조회 중 예외 [{}]: {}", ticker, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // ── 주식기본조회 (CTPF1002R) ─────────────────────────────────────────
+    // 실전 전용 (모의투자 미지원)
+
+    /**
+     * 주식기본정보 조회 (상장일, 업종코드, 주식종류 등)
+     */
+    public Optional<KisStockInfoResponse> getStockInfo(String ticker) {
+        try {
+            String token = getAccessToken();
+            KisStockInfoResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/quotations/search-stock-info")
+                            .queryParam("PRDT_TYPE_CD", "300")
+                            .queryParam("PDNO", ticker)
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "CTPF1002R")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("주식기본조회 실패 [" + ticker + "]: " + body, res.statusCode().value())))
+                    .bodyToMono(KisStockInfoResponse.class)
+                    .block(Duration.ofSeconds(10));
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 주식기본조회 비정상 [{}]: {}", ticker, response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("주식기본조회 중 예외 [{}]: {}", ticker, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // ── 투자자매매동향 (FHPTJ04160001) ───────────────────────────────────
+    // 실전 전용, 당일 데이터는 15:40 이후 가능
+
+    /**
+     * 종목별 투자자매매동향(일별) 조회
+     * @param ticker 종목코드
+     * @param date   조회 일자 (YYYYMMDD)
+     */
+    public Optional<KisInvestorTrendResponse> getInvestorTrend(String ticker, String date) {
+        try {
+            String token = getAccessToken();
+            KisInvestorTrendResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/quotations/investor-trend-estimate")
+                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                            .queryParam("FID_INPUT_ISCD", ticker)
+                            .queryParam("FID_INPUT_DATE_1", date)
+                            .queryParam("FID_ORG_ADJ_PRC", "")
+                            .queryParam("FID_ETC_CLS_CODE", "1")
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "FHPTJ04160001")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("투자자매매동향 조회 실패 [" + ticker + "]: " + body, res.statusCode().value())))
+                    .bodyToMono(KisInvestorTrendResponse.class)
+                    .block(Duration.ofSeconds(10));
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 투자자매매동향 비정상 [{}]: {}", ticker, response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("투자자매매동향 조회 중 예외 [{}]: {}", ticker, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // ── 시가총액 순위 (FHPST01740000) ────────────────────────────────────
+    // 실전 전용, 최대 30건
+
+    /**
+     * 시가총액 순위 조회
+     * @param divCode 0:전체, 1:보통주, 2:우선주
+     */
+    public Optional<KisMarketCapRankResponse> getMarketCapRanking(String divCode) {
+        try {
+            String token = getAccessToken();
+            KisMarketCapRankResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/ranking/market-cap")
+                            .queryParam("fid_cond_mrkt_div_code", "J")
+                            .queryParam("fid_cond_scr_div_code",  "20174")
+                            .queryParam("fid_div_cls_code",        divCode)
+                            .queryParam("fid_input_iscd",          "0000")
+                            .queryParam("fid_trgt_cls_code",       "0")
+                            .queryParam("fid_trgt_exls_cls_code",  "0")
+                            .queryParam("fid_input_price_1", "")
+                            .queryParam("fid_input_price_2", "")
+                            .queryParam("fid_vol_cnt",       "")
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "FHPST01740000")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("시가총액순위 조회 실패: " + body, res.statusCode().value())))
+                    .bodyToMono(KisMarketCapRankResponse.class)
+                    .block(Duration.ofSeconds(10));
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 시가총액순위 비정상: {}", response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("시가총액순위 조회 중 예외: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // ── 거래량 순위 (FHPST01710000) ──────────────────────────────────────
+    // 실전 전용, 최대 30건
+
+    /**
+     * 거래량 순위 조회
+     * @param marketCode J:전체, 0001:코스피, 1001:코스닥
+     */
+    public Optional<KisVolumeRankResponse> getVolumeRanking(String marketCode) {
+        try {
+            String token = getAccessToken();
+            KisVolumeRankResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/quotations/volume-rank")
+                            .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                            .queryParam("FID_COND_SCR_DIV_CODE",  "20171")
+                            .queryParam("FID_INPUT_ISCD", marketCode)
+                            .queryParam("FID_DIV_CLS_CODE",       "0")
+                            .queryParam("FID_BLNG_CLS_CODE",      "0")
+                            .queryParam("FID_TRGT_CLS_CODE",      "111111111")
+                            .queryParam("FID_TRGT_EXLS_CLS_CODE", "0000000000")
+                            .queryParam("FID_INPUT_PRICE_1", "")
+                            .queryParam("FID_INPUT_PRICE_2", "")
+                            .queryParam("FID_VOL_CNT",       "")
+                            .queryParam("FID_INPUT_DATE_1",  "")
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "FHPST01710000")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("거래량순위 조회 실패: " + body, res.statusCode().value())))
+                    .bodyToMono(KisVolumeRankResponse.class)
+                    .block(Duration.ofSeconds(10));
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 거래량순위 비정상: {}", response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("거래량순위 조회 중 예외: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // ── 등락률 순위 (FHPST01700000) ──────────────────────────────────────
+    // 실전 전용, 최대 30건
+
+    /**
+     * 등락률 순위 조회
+     * @param sortCode 0:상승율순 1:하락율순
+     * @param marketCode 0000:전체, 0001:코스피, 1001:코스닥
+     */
+    public Optional<KisChangeRateRankResponse> getChangeRateRanking(String sortCode, String marketCode) {
+        try {
+            String token = getAccessToken();
+            KisChangeRateRankResponse response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/uapi/domestic-stock/v1/ranking/fluctuation")
+                            .queryParam("fid_cond_mrkt_div_code", "J")
+                            .queryParam("fid_cond_scr_div_code",  "20170")
+                            .queryParam("fid_input_iscd",         marketCode)
+                            .queryParam("fid_rank_sort_cls_code", sortCode)
+                            .queryParam("fid_input_cnt_1",        "0")
+                            .queryParam("fid_prc_cls_code",       "1")
+                            .queryParam("fid_input_price_1", "")
+                            .queryParam("fid_input_price_2", "")
+                            .queryParam("fid_vol_cnt",       "")
+                            .queryParam("fid_trgt_cls_code",      "0")
+                            .queryParam("fid_trgt_exls_cls_code", "0")
+                            .queryParam("fid_div_cls_code",       "0")
+                            .queryParam("fid_rsfl_rate1", "")
+                            .queryParam("fid_rsfl_rate2", "")
+                            .build())
+                    .header("authorization", "Bearer " + token)
+                    .header("appkey",    appKey)
+                    .header("appsecret", appSecret)
+                    .header("tr_id",     "FHPST01700000")
+                    .header("custtype",  "P")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            res -> res.bodyToMono(String.class)
+                                    .map(body -> new KisApiException("등락률순위 조회 실패: " + body, res.statusCode().value())))
+                    .bodyToMono(KisChangeRateRankResponse.class)
+                    .block(Duration.ofSeconds(10));
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("KIS 등락률순위 비정상: {}", response != null ? response.message() : "null");
+                return Optional.empty();
+            }
+            return Optional.of(response);
+        } catch (Exception e) {
+            log.error("등락률순위 조회 중 예외: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 현재가 Raw Output 반환 (StockDetailResponse 구성용)
+     */
+    public Optional<KisPriceResponse.Output> getCurrentPriceRaw(String ticker) {
+        try {
+            String token = getAccessToken();
             KisPriceResponse response = webClient.get()
                     .uri(uri -> uri
                             .path("/uapi/domestic-stock/v1/quotations/inquire-price")
@@ -113,37 +392,19 @@ public class StockMarketClient {
                     .retrieve()
                     .onStatus(status -> !status.is2xxSuccessful(),
                             res -> res.bodyToMono(String.class)
-                                    .map(body -> new KisApiException("현재가 조회 실패 [" + ticker + "]: " + body, res.statusCode().value())))
+                                    .map(body -> new KisApiException("현재가(Raw) 조회 실패 [" + ticker + "]: " + body, res.statusCode().value())))
                     .bodyToMono(KisPriceResponse.class)
                     .block(Duration.ofSeconds(10));
 
             if (response == null || !response.isSuccess() || response.output() == null) {
-                log.warn("KIS 응답 비정상 [{}]: {}", ticker, response != null ? response.message() : "null");
+                log.warn("KIS 현재가(Raw) 비정상 [{}]: {}", ticker, response != null ? response.message() : "null");
                 return Optional.empty();
             }
-
-            return Optional.of(mapToStockDto(response.output(), ticker, sector));
-
-        } catch (KisApiException e) {
-            log.error("KIS API 오류 [{}]: {}", ticker, e.getMessage());
-            return Optional.empty();
+            return Optional.of(response.output());
         } catch (Exception e) {
-            log.error("현재가 조회 중 예외 [{}]: {}", ticker, e.getMessage());
+            log.error("현재가(Raw) 조회 중 예외 [{}]: {}", ticker, e.getMessage());
             return Optional.empty();
         }
-    }
-
-    // ── 매핑 ──────────────────────────────────────────────────────────────
-
-    private StockDto mapToStockDto(KisPriceResponse.Output output, String ticker, String sector) {
-        long price     = parseLong(output.currentPrice());
-        double change  = parseDouble(output.changeRate());
-        long marketCap = parseLong(output.marketCapBil()) * 100_000_000L; // 억 → 원
-
-        String name = (output.name() != null && !output.name().isBlank())
-                ? output.name() : ticker;
-
-        return new StockDto(ticker, name, price, change, marketCap, sector);
     }
 
     private long parseLong(String value) {

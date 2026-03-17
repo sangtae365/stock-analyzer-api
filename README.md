@@ -1,126 +1,155 @@
-# stock-analyzer-api
+# Backend — Stock Analyzer
 
-주식 섹터 키워드를 입력하면 관련 종목을 AI가 분석해 대장주·성장 기대주·소외주로 분류해주는 서비스의 **백엔드 REST API 서버**입니다.
+Spring Boot 기반 REST API 서버. KIS OpenAPI 실시간 시세 연동 + Google Gemini AI 키워드 분석.
+
+---
 
 ## 기술 스택
 
-| 분류 | 기술 |
-|------|------|
-| Language | Java 25 LTS |
+| 항목 | 내용 |
+|---|---|
+| Language | Java 25 |
 | Framework | Spring Boot 4.0.3 |
 | HTTP Client | Spring WebFlux (WebClient) |
-| 외부 API | 한국투자증권 KIS OpenAPI |
+| API 문서 | SpringDoc OpenAPI 2.8.6 (Swagger UI) |
+| AI | Google Gemini 2.5 Flash |
+| 시세 데이터 | KIS(한국투자증권) OpenAPI |
 | Build | Maven 3.9 |
 
-## 프로젝트 구조
+---
 
-```
-src/main/java/com/stockanalyzer/
-├── controller/         # REST API 엔드포인트
-├── service/            # 비즈니스 로직 (KIS 실시간 / Mock 폴백)
-├── client/             # KIS OpenAPI WebClient
-│   └── dto/            # KIS 응답 DTO
-├── dto/                # 내부 응답 DTO (record)
-│   └── response/
-├── mock/               # Mock 데이터 (KIS 미연동 시 폴백)
-├── exception/          # 커스텀 예외
-└── config/             # CORS 설정
-```
-
-## API 명세
-
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/stocks` | 전체 종목 조회 (페이징, 정렬) |
-| GET | `/api/stocks/analyze?keyword=` | 키워드 종목 분석 |
-| GET | `/api/stocks/{ticker}` | 종목 상세 정보 |
-| GET | `/api/keywords/popular` | 인기 검색 키워드 |
-| GET | `/api/sectors` | 전체 섹터 목록 |
-| GET | `/api/sectors/{sectorId}/stocks` | 섹터별 종목 목록 |
-
-### 응답 예시 — `GET /api/stocks/analyze?keyword=카카오`
-
-```json
-{
-  "keyword": "카카오",
-  "analyzedAt": "2026-03-16T15:00:00",
-  "totalCount": 5,
-  "categories": [
-    {
-      "category": "대장주",
-      "stocks": [
-        {
-          "ticker": "377300",
-          "name": "카카오페이",
-          "price": 24500,
-          "changeRate": 3.12,
-          "summary": "AI 기반 리스크 분석 고도화로 B2B 확장 중"
-        }
-      ]
-    },
-    { "category": "성장 기대주", "stocks": [ "..." ] },
-    { "category": "소외주",     "stocks": [ "..." ] }
-  ]
-}
-```
-
-## 실행 방법
-
-### 1. 사전 요구사항
-
-- Java 25 LTS ([Eclipse Temurin 다운로드](https://adoptium.net/))
-- Maven 3.9+
-
-### 2. KIS API 키 설정
-
-[KIS Developers](https://apiportal.koreainvestment.com/) 에서 앱 등록 후 키 발급
+## 실행
 
 ```bash
-# application-local.yml.example 을 복사하여 실제 키 입력
-cp src/main/resources/application-local.yml.example \
-   src/main/resources/application-local.yml
-```
-
-```yaml
-# application-local.yml
-kis:
-  app-key: 발급받은_앱키
-  app-secret: 발급받은_앱시크릿
-```
-
-### 3. 빌드 및 실행
-
-```bash
-# Mock 데이터로 실행 (KIS 키 불필요)
+# API 키 없이 목업 데이터로 실행
 mvn spring-boot:run
 
-# 실제 KIS 데이터로 실행
+# application-local.yml에 KIS·Gemini 키 설정 후 실시간 데이터로 실행
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-서버 실행 후 → `http://localhost:8080`
+- 서버 포트: `8080`
+- Swagger UI: http://localhost:8080/swagger-ui.html
 
-### 4. 환경변수로 실행 (운영 환경)
+---
 
-```bash
-export KIS_APP_KEY=발급받은_앱키
-export KIS_APP_SECRET=발급받은_앱시크릿
-java -jar target/stock-analyzer-0.0.1-SNAPSHOT.jar
+## 환경 설정
+
+`src/main/resources/application-local.yml` 생성 (gitignore 적용):
+
+```yaml
+kis:
+  app-key: YOUR_KIS_APP_KEY
+  app-secret: YOUR_KIS_APP_SECRET
+
+gemini:
+  api-key: YOUR_GEMINI_API_KEY
 ```
 
-## KIS 키 미설정 시 동작
+`src/main/resources/application.yml` 기본값:
 
-KIS API 키가 없거나 장애 발생 시 **Mock 데이터로 자동 폴백**되어 서비스가 중단되지 않습니다.
+```yaml
+kis:
+  base-url: https://openapi.koreainvestment.com:9443  # 실전투자
+  # base-url: https://openapivts.koreainvestment.com:29443  # 모의투자
+
+gemini:
+  model: gemini-2.5-flash
+```
+
+---
+
+## API 엔드포인트
+
+### 종목
+
+| Method | URL | 설명 |
+|---|---|---|
+| GET | `/api/stocks` | 시가총액 상위 종목 목록 |
+| GET | `/api/stocks/analyze?keyword={keyword}` | AI 키워드 분석 |
+| GET | `/api/stocks/{ticker}` | 종목 상세 조회 |
+| GET | `/api/stocks/{ticker}/chart` | 캔들 차트 데이터 |
+| GET | `/api/stocks/{ticker}/investor-trend` | 투자자 매매 동향 |
+| GET | `/api/stocks/ranking/volume` | 거래량 순위 |
+| GET | `/api/stocks/ranking/change-rate` | 등락률 순위 |
+
+### 키워드
+
+| Method | URL | 설명 |
+|---|---|---|
+| GET | `/api/keywords/popular` | 인기 검색 키워드 |
+
+---
+
+## 패키지 구조
 
 ```
-KIS API 호출 실패 → WARN 로그 출력 → Mock 데이터 반환
+com.stockanalyzer
+├── controller/
+│   ├── StockController.java          # 종목 관련 API
+│   └── KeywordController.java        # 인기 키워드 API
+├── service/
+│   ├── KisStockAnalysisService.java  # KIS API 오케스트레이션 (Primary)
+│   ├── AiStockAnalysisService.java   # Gemini AI 분석
+│   ├── MockStockPriceProvider.java   # 목업 폴백 데이터
+│   └── KeywordService.java           # 키워드 관리
+├── client/
+│   ├── StockMarketClient.java        # KIS OpenAPI 클라이언트
+│   └── dto/                          # KIS 응답 DTO
+├── dto/
+│   └── response/                     # API 응답 DTO (record)
+├── config/
+│   ├── CorsConfig.java
+│   └── SwaggerConfig.java
+└── exception/
+    └── KisApiException.java
 ```
 
-## CORS 설정
+---
 
-프론트엔드 주소를 허용합니다 (`CorsConfig.java`):
+## AI 분석 흐름
+
+```
+키워드 입력
+    │
+    ▼
+Gemini 2.5 Flash 호출
+    │ 실패 시
+    ├─────────────────────→ 목업 카테고리 9개 종목 반환
+    │
+    ▼ 성공
+JSON 파싱 (대장주 / 성장 기대주 / 소외주)
+    │
+    ▼
+종목별 KIS 실시간 시세 조회
+    │ 실패 시
+    ├─────────────────────→ 목업 시세로 대체 (summary에 "임시 데이터" 표시)
+    │
+    ▼ 성공
+최종 분석 결과 반환
+```
+
+**할루시네이션 방어:**
+- ticker가 6자리 숫자 형식이 아니면 즉시 제외
+- KIS에서 존재하지 않는 종목코드 응답 시 제외
+
+---
+
+## 목업 폴백
+
+KIS 또는 Gemini 연결 불가 시 `MockStockPriceProvider`가 자동으로 목업 데이터를 제공합니다.
+
+| 상황 | 동작 |
+|---|---|
+| Gemini 실패 | 사전 정의된 목업 카테고리 9개 종목 반환 |
+| KIS 종목 목록 실패 | 목업 시가총액 상위 30개 종목 반환 |
+| KIS 개별 시세 실패 | 목업 시세로 대체, summary에 `(임시 데이터)` 표시 |
+
+---
+
+## CORS
+
+`CorsConfig.java`에서 허용 출처:
 
 - `http://localhost:3000`
 - `http://localhost:5173`
-
-운영 환경 프론트엔드 주소가 다를 경우 `CorsConfig.java`를 수정하세요.
