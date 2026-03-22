@@ -1,6 +1,6 @@
 # Backend — Stock Analyzer
 
-Spring Boot 기반 REST API 서버. KIS OpenAPI 실시간 시세 연동 + Google Gemini AI 키워드 분석.
+Spring Boot 기반 REST API 서버. KIS OpenAPI 실시간 시세 연동 + Google Gemini AI 키워드 분석 + AI 에이전트 종목 토론 (SSE 스트리밍).
 
 ---
 
@@ -79,6 +79,12 @@ gemini:
 |---|---|---|
 | GET | `/api/keywords/popular` | 인기 검색 키워드 |
 
+### AI 토론
+
+| Method | URL | 설명 |
+|---|---|---|
+| POST | `/api/debate` | 종목 간 AI 토론 시작 (SSE 스트리밍) |
+
 ---
 
 ## 패키지 구조
@@ -87,17 +93,22 @@ gemini:
 com.stockanalyzer
 ├── controller/
 │   ├── StockController.java          # 종목 관련 API
-│   └── KeywordController.java        # 인기 키워드 API
+│   ├── KeywordController.java        # 인기 키워드 API
+│   └── DebateController.java         # AI 토론 API (SSE)
 ├── service/
 │   ├── KisStockAnalysisService.java  # KIS API 오케스트레이션 (Primary)
 │   ├── AiStockAnalysisService.java   # Gemini AI 분석
 │   ├── MockStockPriceProvider.java   # 목업 폴백 데이터
-│   └── KeywordService.java           # 키워드 관리
+│   ├── KeywordService.java           # 키워드 관리
+│   └── DebateService.java            # AI 토론 오케스트레이션
 ├── client/
 │   ├── StockMarketClient.java        # KIS OpenAPI 클라이언트
 │   └── dto/                          # KIS 응답 DTO
 ├── dto/
+│   ├── request/
+│   │   └── DebateRequest.java        # 토론 요청 DTO
 │   └── response/                     # API 응답 DTO (record)
+│       └── DebateEvent.java          # SSE 이벤트 DTO
 ├── config/
 │   ├── CorsConfig.java
 │   └── SwaggerConfig.java
@@ -132,6 +143,46 @@ JSON 파싱 (대장주 / 성장 기대주 / 소외주)
 **할루시네이션 방어:**
 - ticker가 6자리 숫자 형식이 아니면 즉시 제외
 - KIS에서 존재하지 않는 종목코드 응답 시 제외
+
+---
+
+## AI 토론 흐름
+
+```
+POST /api/debate { stocks: ["삼성전자", "SK하이닉스"] }
+    │
+    ▼  (SSE 스트리밍 시작)
+1단계: 종목명 → ticker 변환 (Gemini)
+    │  loading 이벤트 전송
+    ▼
+2단계: KIS 실시간 시세 조회 (현재가, PER/PBR/EPS, 52주 고저가, 외국인 소진율 등)
+    │  loading 이벤트 전송
+    ▼
+3단계: Google Search 뉴스 수집 (종목별 최근 7일 뉴스, Gemini google_search 도구)
+    │  loading 이벤트 전송
+    ▼
+4단계: Gemini 심층 토론 (thinkingBudget=8000, 4라운드)
+    │  Round 1: 입장 발표 — 각 지지자의 종목 장점 발표
+    │  Round 2: 비판적 검토 — 비평가(critic)의 리스크 분석
+    │  Round 3: 교차 반박 — 상대 지지자 주장 직접 반박·비교
+    │  Round 4: 최종 평가 — 종합 투자 의견
+    │  각 발언마다 message 이벤트 스트리밍
+    ▼
+5단계: 결론 도출 — 종목별 점수(0~100) + 종합 요약
+    │  conclusion 이벤트 전송
+    ▼
+done 이벤트
+```
+
+**SSE 이벤트 타입:**
+
+| type | 설명 |
+|---|---|
+| `loading` | 준비 단계 진행 상황 메시지 |
+| `message` | 에이전트 발언 (agentName, agentRole, targetStock, round, message) |
+| `conclusion` | 최종 결과 (scores[], summary) |
+| `done` | 스트림 종료 |
+| `error` | 오류 발생 |
 
 ---
 
